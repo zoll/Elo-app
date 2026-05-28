@@ -77,6 +77,12 @@ export default function App() {
           </>
         )}
       </main>
+
+      <footer className="footer">
+        <a href="https://github.com/zoll/Elo-app" target="_blank" rel="noopener noreferrer">
+          github.com/zoll/Elo-app
+        </a>
+      </footer>
     </div>
   );
 }
