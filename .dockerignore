@@ -1,0 +1,8 @@
+**/node_modules
+**/bin
+**/obj
+frontend/dist
+backend/wwwroot
+.git
+.gitignore
+*.md
