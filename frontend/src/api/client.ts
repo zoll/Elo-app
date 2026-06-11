@@ -1,4 +1,4 @@
-import type { Game, Player, Tournament, TournamentSummary, TournamentFormat } from '../types';
+import type { Game, Player, PlayerDetail, Tournament, TournamentSummary, TournamentFormat } from '../types';
 
 const API = '/api';
 
@@ -16,6 +16,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getPlayers: () => request<Player[]>('/players'),
+  getPlayer: (id: number) => request<PlayerDetail>(`/players/${id}`),
   createPlayer: (name: string) =>
     request<Player>('/players', { method: 'POST', body: JSON.stringify({ name }) }),
   getGames: (limit = 50) => request<Game[]>(`/games?limit=${limit}`),

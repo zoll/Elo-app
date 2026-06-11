@@ -55,6 +55,29 @@ export interface Tournament extends TournamentSummary {
   timeTrialEntries: TimeTrialEntry[];
 }
 
+export interface PlayerGame {
+  id: number;
+  playedAt: string;
+  isWin: boolean;
+  opponent: string;
+  opponentId: number;
+  mySets: number;
+  opponentSets: number;
+  eloBefore: number;
+  eloAfter: number;
+  eloChange: number;
+}
+
+export interface PlayerDetail {
+  id: number;
+  name: string;
+  eloRating: number;
+  gamesWon: number;
+  gamesLost: number;
+  createdAt: string;
+  games: PlayerGame[];
+}
+
 export interface Player {
   id: number;
   name: string;

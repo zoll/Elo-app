@@ -37,7 +37,11 @@ export default function Leaderboard({ players }: Props) {
             {players.map((p, i) => (
               <tr key={p.id}>
                 <td className={rankClass(i)} style={{ width: 40 }}>{rankLabel(i)}</td>
-                <td style={{ fontWeight: 600 }}>{p.name}</td>
+                <td style={{ fontWeight: 600 }}>
+                  <a href={`#players/${p.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+                    {p.name}
+                  </a>
+                </td>
                 <td className="elo-value">{p.eloRating}</td>
                 <td><span className="badge badge-win">{p.gamesWon}</span></td>
                 <td><span className="badge badge-loss">{p.gamesLost}</span></td>

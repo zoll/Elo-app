@@ -42,7 +42,7 @@ export default function GameHistory({ games }: Props) {
                   {timeAgo(g.playedAt)}
                 </td>
                 <td>
-                  <span style={{ fontWeight: 600 }}>{g.winner}</span>
+                  <a href={`#players/${g.winnerId}`} style={{ fontWeight: 600, color: 'inherit', textDecoration: 'none' }}>{g.winner}</a>
                   <span className="elo-before-after" style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 6 }}>
                     {g.winnerEloBefore}→{g.winnerEloAfter}
                   </span>
@@ -53,7 +53,7 @@ export default function GameHistory({ games }: Props) {
                   <span className="elo-change-neg">{g.loserSets}</span>
                 </td>
                 <td>
-                  <span>{g.loser}</span>
+                  <a href={`#players/${g.loserId}`} style={{ color: 'inherit', textDecoration: 'none' }}>{g.loser}</a>
                   <span className="elo-before-after" style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 6 }}>
                     {g.loserEloBefore}→{g.loserEloAfter}
                   </span>

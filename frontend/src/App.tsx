@@ -6,6 +6,7 @@ import RecordGame from './components/RecordGame';
 import GameHistory from './components/GameHistory';
 import AddPlayer from './components/AddPlayer';
 import Tournaments from './components/Tournaments';
+import PlayerHistory from './components/PlayerHistory';
 
 type Tab = 'leaderboard' | 'record' | 'history' | 'tournaments' | 'add';
 
@@ -17,18 +18,25 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'add', label: '➕ Add Player' },
 ];
 
-interface Route { tab: Tab; tournamentId?: number }
+interface Route { tab: Tab; subId?: number; subType?: 'tournament' | 'player' }
 
 function parseHash(hash: string): Route {
   const h = hash.startsWith('#') ? hash.slice(1) : hash;
   const [segment, idStr] = h.split('/');
+  const id = idStr ? parseInt(idStr, 10) : undefined;
+  const numId = id && !isNaN(id) ? id : undefined;
+
+  if (segment === 'players' && numId)
+    return { tab: 'leaderboard', subId: numId, subType: 'player' };
+
   const tab = TABS.some(t => t.id === segment) ? (segment as Tab) : 'leaderboard';
-  const tournamentId = idStr ? parseInt(idStr, 10) : undefined;
-  return { tab, tournamentId: tournamentId && !isNaN(tournamentId) ? tournamentId : undefined };
+  if (segment === 'tournaments' && numId)
+    return { tab, subId: numId, subType: 'tournament' };
+  return { tab };
 }
 
-function hashFor(tab: Tab, tournamentId?: number) {
-  return tournamentId ? `#${tab}/${tournamentId}` : `#${tab}`;
+function hashFor(tab: Tab, subType?: 'tournament' | 'player', subId?: number) {
+  return subId ? `#${subType === 'player' ? 'players' : tab}/${subId}` : `#${tab}`;
 }
 
 export default function App() {
@@ -44,8 +52,8 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  const navigate = useCallback((tab: Tab, tournamentId?: number) => {
-    window.location.hash = hashFor(tab, tournamentId);
+  const navigate = useCallback((tab: Tab, subType?: 'tournament' | 'player', subId?: number) => {
+    window.location.hash = hashFor(tab, subType, subId);
   }, []);
 
   const loadData = useCallback(async () => {
@@ -72,7 +80,7 @@ export default function App() {
             {TABS.map(t => (
               <a
                 key={t.id}
-                href={hashFor(t.id)}
+                href={`#${t.id}`}
                 className={`tab-btn${route.tab === t.id ? ' active' : ''}`}
               >
                 {t.label}
@@ -93,14 +101,16 @@ export default function App() {
           <div className="loading">Loading...</div>
         ) : (
           <>
-            {route.tab === 'leaderboard' && <Leaderboard players={players} />}
+            {route.tab === 'leaderboard' && route.subType === 'player' && route.subId
+              ? <PlayerHistory playerId={route.subId} />
+              : route.tab === 'leaderboard' && <Leaderboard players={players} />}
             {route.tab === 'record' && <RecordGame players={players} onGameRecorded={loadData} />}
             {route.tab === 'history' && <GameHistory games={games} />}
             {route.tab === 'tournaments' && (
               <Tournaments
                 players={players}
-                initialTournamentId={route.tournamentId}
-                onNavigate={(id) => navigate('tournaments', id)}
+                initialTournamentId={route.subType === 'tournament' ? route.subId : undefined}
+                onNavigate={(id) => navigate('tournaments', 'tournament', id)}
               />
             )}
             {route.tab === 'add' && <AddPlayer onPlayerAdded={loadData} />}

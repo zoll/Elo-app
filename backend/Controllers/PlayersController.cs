@@ -49,6 +49,9 @@ public class PlayersController(AppDbContext db) : ControllerBase
                 g.PlayedAt,
                 IsWin = true,
                 Opponent = g.Loser.Name,
+                OpponentId = g.LoserId,
+                MySets = g.WinnerSets,
+                OpponentSets = g.LoserSets,
                 EloBefore = g.WinnerEloBefore,
                 EloAfter = g.WinnerEloAfter,
                 EloChange = g.WinnerEloAfter - g.WinnerEloBefore
@@ -61,6 +64,9 @@ public class PlayersController(AppDbContext db) : ControllerBase
                     g.PlayedAt,
                     IsWin = false,
                     Opponent = g.Winner.Name,
+                    OpponentId = g.WinnerId,
+                    MySets = g.LoserSets,
+                    OpponentSets = g.WinnerSets,
                     EloBefore = g.LoserEloBefore,
                     EloAfter = g.LoserEloAfter,
                     EloChange = g.LoserEloAfter - g.LoserEloBefore
