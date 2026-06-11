@@ -17,12 +17,36 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'add', label: '➕ Add Player' },
 ];
 
+interface Route { tab: Tab; tournamentId?: number }
+
+function parseHash(hash: string): Route {
+  const h = hash.startsWith('#') ? hash.slice(1) : hash;
+  const [segment, idStr] = h.split('/');
+  const tab = TABS.some(t => t.id === segment) ? (segment as Tab) : 'leaderboard';
+  const tournamentId = idStr ? parseInt(idStr, 10) : undefined;
+  return { tab, tournamentId: tournamentId && !isNaN(tournamentId) ? tournamentId : undefined };
+}
+
+function hashFor(tab: Tab, tournamentId?: number) {
+  return tournamentId ? `#${tab}/${tournamentId}` : `#${tab}`;
+}
+
 export default function App() {
-  const [tab, setTab] = useState<Tab>('leaderboard');
+  const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash));
   const [players, setPlayers] = useState<Player[]>([]);
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onHashChange = () => setRoute(parseHash(window.location.hash));
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const navigate = useCallback((tab: Tab, tournamentId?: number) => {
+    window.location.hash = hashFor(tab, tournamentId);
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -46,13 +70,13 @@ export default function App() {
           <h1>🏓 Table Tennis ELO</h1>
           <nav className="tabs">
             {TABS.map(t => (
-              <button
+              <a
                 key={t.id}
-                className={`tab-btn${tab === t.id ? ' active' : ''}`}
-                onClick={() => setTab(t.id)}
+                href={hashFor(t.id)}
+                className={`tab-btn${route.tab === t.id ? ' active' : ''}`}
               >
                 {t.label}
-              </button>
+              </a>
             ))}
           </nav>
         </div>
@@ -69,11 +93,17 @@ export default function App() {
           <div className="loading">Loading...</div>
         ) : (
           <>
-            {tab === 'leaderboard' && <Leaderboard players={players} />}
-            {tab === 'record' && <RecordGame players={players} onGameRecorded={loadData} />}
-            {tab === 'history' && <GameHistory games={games} />}
-            {tab === 'tournaments' && <Tournaments players={players} />}
-            {tab === 'add' && <AddPlayer onPlayerAdded={loadData} />}
+            {route.tab === 'leaderboard' && <Leaderboard players={players} />}
+            {route.tab === 'record' && <RecordGame players={players} onGameRecorded={loadData} />}
+            {route.tab === 'history' && <GameHistory games={games} />}
+            {route.tab === 'tournaments' && (
+              <Tournaments
+                players={players}
+                initialTournamentId={route.tournamentId}
+                onNavigate={(id) => navigate('tournaments', id)}
+              />
+            )}
+            {route.tab === 'add' && <AddPlayer onPlayerAdded={loadData} />}
           </>
         )}
       </main>

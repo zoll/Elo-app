@@ -1,4 +1,4 @@
-export type TournamentFormat = 'SingleElim' | 'DoubleElim' | 'Swiss';
+export type TournamentFormat = 'SingleElim' | 'DoubleElim' | 'Swiss' | 'TimeTrial';
 export type TournamentStatus = 'Pending' | 'InProgress' | 'Completed';
 export type MatchBracket = 'Winners' | 'Losers' | 'GrandFinal' | null;
 
@@ -11,6 +11,14 @@ export interface TournamentSummary {
   createdAt: string;
   playerCount: number;
   winnerName: string | null;
+}
+
+export interface TimeTrialEntry {
+  id: number;
+  playerId: number;
+  playerName: string;
+  timeMs: number;
+  recordedAt: string;
 }
 
 export interface TournamentParticipant {
@@ -44,6 +52,7 @@ export interface TournamentMatch {
 export interface Tournament extends TournamentSummary {
   participants: TournamentParticipant[];
   matches: TournamentMatch[];
+  timeTrialEntries: TimeTrialEntry[];
 }
 
 export interface Player {

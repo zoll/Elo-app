@@ -41,4 +41,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ player1Sets, player2Sets }),
     }),
+  addTimeTrialEntry: (tournamentId: number, playerId: number, timeMs: number) =>
+    request<Tournament>(`/tournaments/${tournamentId}/timetrial`, {
+      method: 'POST',
+      body: JSON.stringify({ playerId, timeMs }),
+    }),
+  completeTournament: (tournamentId: number) =>
+    request<Tournament>(`/tournaments/${tournamentId}/complete`, { method: 'POST', body: '{}' }),
 };

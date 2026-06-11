@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Tournament> Tournaments => Set<Tournament>();
     public DbSet<TournamentParticipant> TournamentParticipants => Set<TournamentParticipant>();
     public DbSet<TournamentMatch> TournamentMatches => Set<TournamentMatch>();
+    public DbSet<TimeTrialEntry> TimeTrialEntries => Set<TimeTrialEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,5 +77,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<TournamentMatch>()
             .Property(m => m.Bracket)
             .HasConversion<string>();
+
+        modelBuilder.Entity<TimeTrialEntry>()
+            .HasOne(e => e.Tournament)
+            .WithMany(t => t.TimeTrialEntries)
+            .HasForeignKey(e => e.TournamentId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<TimeTrialEntry>()
+            .HasOne(e => e.Player)
+            .WithMany()
+            .HasForeignKey(e => e.PlayerId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

@@ -25,6 +25,8 @@ public class TournamentService(AppDbContext db)
             case TournamentFormat.Swiss:
                 GenerateSwissRound1(tournament, participants);
                 break;
+            case TournamentFormat.TimeTrial:
+                break;
         }
 
         // Phase 1: insert all matches → DB assigns IDs
@@ -278,24 +280,32 @@ public class TournamentService(AppDbContext db)
                 links.Add((cur[i], nextWb[i / 2], lbTarget));
             }
         }
-        // WB final winner → GF; WB final loser → last LB round
-        links.Add((wbAll[^1][0], gf, lbAll[^1][0]));
-
-        // ── LB internal links: winner → next LB round
-        // Even-indexed LB rounds feed into same-size rounds (1-to-1: next[i])
-        // Odd-indexed LB rounds feed into halved rounds (2-to-1: next[i/2])
-        for (int r = 0; r < lbAll.Count - 1; r++)
+        if (lbAll.Count > 0)
         {
-            var cur  = lbAll[r];
-            var next = lbAll[r + 1];
-            for (int i = 0; i < cur.Count; i++)
+            // WB final winner → GF; WB final loser → LB final
+            links.Add((wbAll[^1][0], gf, lbAll[^1][0]));
+
+            // ── LB internal links: winner → next LB round
+            // Even-indexed LB rounds feed into same-size rounds (1-to-1: next[i])
+            // Odd-indexed LB rounds feed into halved rounds (2-to-1: next[i/2])
+            for (int r = 0; r < lbAll.Count - 1; r++)
             {
-                var target = r % 2 == 0 ? next[i] : next[i / 2];
-                links.Add((cur[i], target, null));
+                var cur  = lbAll[r];
+                var next = lbAll[r + 1];
+                for (int i = 0; i < cur.Count; i++)
+                {
+                    var target = r % 2 == 0 ? next[i] : next[i / 2];
+                    links.Add((cur[i], target, null));
+                }
             }
+            // LB final → GF
+            links.Add((lbAll[^1][0], gf, null));
         }
-        // LB final → GF
-        links.Add((lbAll[^1][0], gf, null));
+        else
+        {
+            // 2-player edge case: no LB rounds, WB loser goes directly to GF
+            links.Add((wbAll[^1][0], gf, gf));
+        }
 
         return links;
     }
@@ -475,7 +485,7 @@ public class TournamentService(AppDbContext db)
     }
 
     private static bool IsTournamentComplete(Tournament t) =>
-        t.Matches.All(m => IsResolved(m));
+        t.Format != TournamentFormat.TimeTrial && t.Matches.All(m => IsResolved(m));
 
     private static void SetNextPlayer(TournamentMatch match, int playerId)
     {

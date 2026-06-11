@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Player, Tournament, TournamentSummary, TournamentFormat, TournamentMatch } from '../types';
+import type { Player, Tournament, TournamentSummary, TournamentFormat, TournamentMatch, TimeTrialEntry } from '../types';
 import { api } from '../api/client';
 
-interface Props { players: Player[] }
+interface Props {
+  players: Player[];
+  initialTournamentId?: number;
+  onNavigate: (id?: number) => void;
+}
 
-export default function Tournaments({ players }: Props) {
+export default function Tournaments({ players, initialTournamentId, onNavigate }: Props) {
   const [list, setList] = useState<TournamentSummary[]>([]);
   const [selected, setSelected] = useState<Tournament | null>(null);
   const [creating, setCreating] = useState(false);
@@ -17,15 +21,34 @@ export default function Tournaments({ players }: Props) {
 
   useEffect(() => { void loadList(); }, [loadList]);
 
-  const openTournament = async (id: number) => setSelected(await api.getTournament(id));
+  // Open tournament from URL on initial load
+  useEffect(() => {
+    if (initialTournamentId && !selected) {
+      api.getTournament(initialTournamentId).then(t => setSelected(t)).catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTournamentId]);
+
+  const openTournament = async (id: number) => {
+    const t = await api.getTournament(id);
+    setSelected(t);
+    onNavigate(id);
+  };
 
   const onCreated = async (t: Tournament) => {
     setCreating(false);
     await loadList();
     setSelected(t);
+    onNavigate(t.id);
   };
 
   const onUpdated = (t: Tournament) => setSelected(t);
+
+  const goBack = () => {
+    setSelected(null);
+    onNavigate(undefined);
+    void loadList();
+  };
 
   if (creating)
     return <CreateTournament onCreated={onCreated} onCancel={() => setCreating(false)} />;
@@ -36,7 +59,7 @@ export default function Tournaments({ players }: Props) {
         tournament={selected}
         players={players}
         onUpdated={onUpdated}
-        onBack={() => { setSelected(null); void loadList(); }}
+        onBack={goBack}
       />
     );
 
@@ -74,7 +97,11 @@ export default function Tournaments({ players }: Props) {
                   <td className="hide-mobile" style={{ fontWeight: t.winnerName ? 600 : undefined, color: t.winnerName ? 'var(--win)' : 'var(--muted)' }}>
                     {t.winnerName ? `🏆 ${t.winnerName}` : '—'}
                   </td>
-                  <td><button className="btn-sm" onClick={() => void openTournament(t.id)}>View</button></td>
+                  <td>
+                    <a className="btn-sm" href={`#tournaments/${t.id}`} onClick={e => { e.preventDefault(); void openTournament(t.id); }}>
+                      View
+                    </a>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -124,10 +151,13 @@ function CreateTournament({ onCreated, onCancel }: {
           <option value="SingleElim">Single Elimination</option>
           <option value="DoubleElim">Double Elimination</option>
           <option value="Swiss">Swiss</option>
+          <option value="TimeTrial">Time Trial</option>
         </select>
       </div>
       <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 16px' }}>
-        Players sign up after creation. Start the tournament when everyone is ready.
+        {format === 'TimeTrial'
+          ? 'Players submit their best times. End the tournament manually when everyone is done — fastest time wins.'
+          : 'Players sign up after creation. Start the tournament when everyone is ready.'}
       </p>
       <button className="btn" onClick={() => void submit()} disabled={submitting}>
         {submitting ? 'Creating…' : 'Create Tournament'}
@@ -149,7 +179,7 @@ function TournamentDetail({ tournament, players, onUpdated, onBack }: {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div className="card" style={{ padding: '14px 20px' }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn-ghost" onClick={onBack}>← Back</button>
+          <a className="btn-ghost" href="#tournaments" onClick={e => { e.preventDefault(); onBack(); }}>← Back</a>
           <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>{tournament.name}</span>
           <span className="badge" style={{ background: 'var(--surface2)', color: 'var(--text)' }}>{formatLabel(tournament.format)}</span>
           <StatusBadge status={tournament.status} />
@@ -157,7 +187,11 @@ function TournamentDetail({ tournament, players, onUpdated, onBack }: {
         </div>
       </div>
 
-      {tournament.status === 'Pending' ? (
+      {tournament.format === 'TimeTrial' ? (
+        tournament.status === 'Pending'
+          ? <TimeTrialPendingView tournament={tournament} onUpdated={onUpdated} />
+          : <TimeTrialView tournament={tournament} players={players} onUpdated={onUpdated} />
+      ) : tournament.status === 'Pending' ? (
         <PendingView tournament={tournament} players={players} onUpdated={onUpdated} />
       ) : (
         <>
@@ -178,86 +212,68 @@ function PendingView({ tournament, players, onUpdated }: {
   players: Player[];
   onUpdated: (t: Tournament) => void;
 }) {
-  const [selectedPlayerId, setSelectedPlayerId] = useState<number | ''>('');
-  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState<number | null>(null); // playerId currently being toggled
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
 
   const registeredIds = new Set(tournament.participants.map(p => p.playerId));
-  const available = players.filter(p => !registeredIds.has(p.id));
   const canStart = tournament.participants.length >= 2;
   const estimatedRounds = tournament.format === 'Swiss' && tournament.participants.length >= 2
     ? Math.max(3, Math.ceil(Math.log2(tournament.participants.length)) + 1)
     : null;
 
-  const add = async () => {
-    if (!selectedPlayerId) return;
-    setAdding(true); setError('');
-    try {
-      onUpdated(await api.addParticipant(tournament.id, selectedPlayerId as number));
-      setSelectedPlayerId('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error adding player');
-    } finally { setAdding(false); }
+  const join = async (playerId: number) => {
+    setBusy(playerId); setError('');
+    try { onUpdated(await api.addParticipant(tournament.id, playerId)); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Error joining'); }
+    finally { setBusy(null); }
   };
 
-  const remove = async (playerId: number) => {
-    setError('');
+  const leave = async (playerId: number) => {
+    setBusy(playerId); setError('');
     try { onUpdated(await api.removeParticipant(tournament.id, playerId)); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Error removing player'); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Error leaving'); }
+    finally { setBusy(null); }
   };
 
   const start = async () => {
     setStarting(true); setError('');
     try { onUpdated(await api.startTournament(tournament.id)); }
-    catch (e) {
-      setError(e instanceof Error ? e.message : 'Error starting tournament');
-      setStarting(false);
-    }
+    catch (e) { setError(e instanceof Error ? e.message : 'Error starting'); setStarting(false); }
   };
 
   return (
     <div className="card">
       <h3 className="card-title">
-        Registration
+        Sign Up
         <span style={{ fontWeight: 400, fontSize: '0.9rem', color: 'var(--muted)', marginLeft: 8 }}>
-          {tournament.participants.length} player{tournament.participants.length !== 1 ? 's' : ''}
+          {tournament.participants.length} joined
         </span>
       </h3>
       {error && <div className="error-msg">{error}</div>}
-      {tournament.participants.length === 0 ? (
-        <div className="empty-state" style={{ padding: '16px 0' }}>No players signed up yet.</div>
-      ) : (
-        <div className="player-select-list" style={{ marginBottom: 16 }}>
-          {[...tournament.participants].sort((a, b) => a.seed - b.seed).map(p => (
-            <div key={p.id} className="player-select-row selected" style={{ cursor: 'default' }}>
-              <span className="player-seed">{p.seed}</span>
-              <span>{p.playerName}</span>
+      <div className="player-select-list" style={{ marginBottom: 16 }}>
+        {players.map(p => {
+          const joined = registeredIds.has(p.id);
+          return (
+            <div key={p.id} className={`player-select-row${joined ? ' selected' : ''}`}>
+              <span>{p.name}</span>
               <button
-                className="btn-ghost"
-                style={{ fontSize: 12, marginLeft: 'auto', color: 'var(--loss)' }}
-                onClick={() => void remove(p.playerId)}
-              >Remove</button>
+                className={joined ? 'btn-ghost' : 'btn-sm'}
+                style={{ marginLeft: 'auto', ...(joined ? { color: 'var(--muted)' } : {}) }}
+                onClick={() => void (joined ? leave(p.id) : join(p.id))}
+                disabled={busy === p.id || starting}
+              >
+                {busy === p.id ? '…' : joined ? 'Leave' : 'Join'}
+              </button>
             </div>
-          ))}
-        </div>
-      )}
-      {available.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-          <select value={selectedPlayerId} onChange={e => setSelectedPlayerId(e.target.value ? Number(e.target.value) : '')} style={{ flex: 1 }}>
-            <option value="">— Add a player —</option>
-            {available.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <button className="btn" onClick={() => void add()} disabled={!selectedPlayerId || adding}>
-            {adding ? '…' : 'Add'}
-          </button>
-        </div>
-      )}
+          );
+        })}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <button className="btn" onClick={() => void start()} disabled={!canStart || starting}>
+        <button className="btn" onClick={() => void start()} disabled={!canStart || starting || busy !== null}>
           {starting ? 'Starting…' : 'Start Tournament'}
         </button>
-        {!canStart && <span style={{ color: 'var(--muted)', fontSize: 13 }}>Need at least 2 players to start</span>}
+        {!canStart && <span style={{ color: 'var(--muted)', fontSize: 13 }}>Need at least 2 players</span>}
         {estimatedRounds && <span style={{ color: 'var(--muted)', fontSize: 13 }}>{estimatedRounds} rounds (Swiss)</span>}
       </div>
     </div>
@@ -621,6 +637,250 @@ function SetsInput({ label, value, onChange }: { label: string; value: number; o
   );
 }
 
+// ── Time Trial View ───────────────────────────────────────────────────────────
+
+function digitsToMs(digits: string): number {
+  const p = digits.padStart(6, '0');
+  const min = parseInt(p.slice(0, 2), 10);
+  const sec = parseInt(p.slice(2, 4), 10);
+  const cs  = parseInt(p.slice(4, 6), 10);
+  return (min * 60 + sec) * 1000 + cs * 10;
+}
+
+function formatDigits(digits: string): string {
+  const p = digits.padStart(6, '0');
+  const min = p.slice(0, 2).replace(/^0/, '') || '0';
+  return `${min}:${p.slice(2, 4)}.${p.slice(4, 6)}`;
+}
+
+function TimeInput({ submitKey, onValue }: { submitKey: number; onValue: (ms: number) => void }) {
+  const [digits, setDigits] = useState('');
+
+  useEffect(() => { setDigits(''); onValue(0); }, [submitKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key >= '0' && e.key <= '9') {
+      if (digits.length >= 6) return;
+      e.preventDefault();
+      const next = digits + e.key;
+      setDigits(next);
+      onValue(digitsToMs(next));
+    } else if (e.key === 'Backspace') {
+      e.preventDefault();
+      const next = digits.slice(0, -1);
+      setDigits(next);
+      onValue(digitsToMs(next));
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={formatDigits(digits)}
+      onKeyDown={handleKeyDown}
+      onChange={() => {}}
+      style={{
+        width: 110,
+        fontFamily: 'monospace',
+        fontSize: '1.3rem',
+        textAlign: 'center',
+        letterSpacing: 1,
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    />
+  );
+}
+
+function formatTime(ms: number) {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  const centis = Math.floor((ms % 1000) / 10);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(centis).padStart(2, '0')}`;
+}
+
+function bestTimes(entries: TimeTrialEntry[]): { playerId: number; playerName: string; bestMs: number; attempts: number }[] {
+  const map = new Map<number, { playerName: string; bestMs: number; attempts: number }>();
+  for (const e of entries) {
+    const prev = map.get(e.playerId);
+    if (!prev) map.set(e.playerId, { playerName: e.playerName, bestMs: e.timeMs, attempts: 1 });
+    else { prev.attempts++; if (e.timeMs < prev.bestMs) prev.bestMs = e.timeMs; }
+  }
+  return [...map.entries()]
+    .map(([playerId, v]) => ({ playerId, ...v }))
+    .sort((a, b) => a.bestMs - b.bestMs);
+}
+
+function TimeTrialPendingView({ tournament, onUpdated }: {
+  tournament: Tournament;
+  onUpdated: (t: Tournament) => void;
+}) {
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState('');
+
+  const start = async () => {
+    setStarting(true); setError('');
+    try { onUpdated(await api.startTournament(tournament.id)); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Error starting tournament'); setStarting(false); }
+  };
+
+  return (
+    <div className="card">
+      <h3 className="card-title">Time Trial</h3>
+      {error && <div className="error-msg">{error}</div>}
+      <p style={{ color: 'var(--muted)', fontSize: 14, margin: '0 0 16px' }}>
+        Once started, anyone can submit their time. No pre-registration needed — submitting a time counts as entering.
+      </p>
+      <button className="btn" onClick={() => void start()} disabled={starting}>
+        {starting ? 'Starting…' : 'Start Tournament'}
+      </button>
+    </div>
+  );
+}
+
+function TimeTrialView({ tournament, players, onUpdated }: {
+  tournament: Tournament;
+  players: Player[];
+  onUpdated: (t: Tournament) => void;
+}) {
+  const [selectedPlayerId, setSelectedPlayerId] = useState<number | ''>('');
+  const [timeMs, setTimeMs] = useState(0);
+  const [submitKey, setSubmitKey] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [error, setError] = useState('');
+
+  const leaderboard = bestTimes(tournament.timeTrialEntries ?? []);
+
+  const submitTime = async () => {
+    if (!selectedPlayerId) { setError('Select a player.'); return; }
+    if (timeMs <= 0) { setError('Enter a time greater than zero.'); return; }
+    setSubmitting(true); setError('');
+    try {
+      onUpdated(await api.addTimeTrialEntry(tournament.id, selectedPlayerId as number, timeMs));
+      setSubmitKey(k => k + 1);
+      setSelectedPlayerId('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error submitting time');
+    } finally { setSubmitting(false); }
+  };
+
+  const complete = async () => {
+    setCompleting(true); setError('');
+    try { onUpdated(await api.completeTournament(tournament.id)); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Error ending tournament'); setCompleting(false); }
+  };
+
+  return (
+    <>
+      {/* Status bar */}
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          {tournament.status === 'Completed' && leaderboard[0] ? (
+            <div style={{ fontWeight: 700, color: 'var(--win)', fontSize: '1.1rem' }}>
+              Winner: {leaderboard[0].playerName} — {formatTime(leaderboard[0].bestMs)}
+            </div>
+          ) : (
+            <span style={{ color: 'var(--muted)', fontSize: 14 }}>End the tournament when everyone has submitted their time.</span>
+          )}
+          {tournament.status === 'InProgress' && (
+            <button
+              className="btn"
+              style={{ background: 'var(--loss)', borderColor: 'var(--loss)' }}
+              onClick={() => void complete()}
+              disabled={completing}
+            >
+              {completing ? 'Ending…' : 'End Tournament'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Leaderboard */}
+      <div className="card">
+        <h3 className="card-title">Leaderboard</h3>
+        {leaderboard.length === 0 ? (
+          <div className="empty-state" style={{ padding: '12px 0' }}>No times submitted yet.</div>
+        ) : (
+          <div className="table-responsive">
+            <table>
+              <thead>
+                <tr><th>#</th><th>Player</th><th>Best Time</th><th>Attempts</th></tr>
+              </thead>
+              <tbody>
+                {leaderboard.map((row, i) => (
+                  <tr key={row.playerId}>
+                    <td style={{ color: 'var(--muted)' }}>{i + 1}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {tournament.status === 'Completed' && i === 0 ? '🏆 ' : ''}{row.playerName}
+                    </td>
+                    <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: i === 0 ? 700 : undefined, color: i === 0 ? 'var(--win)' : undefined }}>
+                      {formatTime(row.bestMs)}
+                    </td>
+                    <td style={{ color: 'var(--muted)' }}>{row.attempts}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Submit time */}
+      {tournament.status === 'InProgress' && (
+        <div className="card">
+          <h3 className="card-title">Submit Time</h3>
+          {error && <div className="error-msg">{error}</div>}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div className="form-group" style={{ margin: 0, flex: '1 1 160px' }}>
+              <label>Player</label>
+              <select value={selectedPlayerId} onChange={e => setSelectedPlayerId(e.target.value ? Number(e.target.value) : '')}>
+                <option value="">— Select player —</option>
+                {players.map(p =>
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                )}
+              </select>
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label>Time — type digits, backspace to clear</label>
+              <TimeInput submitKey={submitKey} onValue={setTimeMs} />
+            </div>
+            <button className="btn" onClick={() => void submitTime()} disabled={submitting} style={{ marginBottom: 0 }}>
+              {submitting ? 'Submitting…' : 'Submit'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* All entries */}
+      {(tournament.timeTrialEntries ?? []).length > 0 && (
+        <div className="card">
+          <h3 className="card-title">All Entries</h3>
+          <div className="table-responsive">
+            <table>
+              <thead>
+                <tr><th>Player</th><th>Time</th><th>Submitted</th></tr>
+              </thead>
+              <tbody>
+                {[...(tournament.timeTrialEntries ?? [])].sort((a, b) => a.timeMs - b.timeMs).map(e => (
+                  <tr key={e.id}>
+                    <td>{e.playerName}</td>
+                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(e.timeMs)}</td>
+                    <td style={{ color: 'var(--muted)', fontSize: 12 }}>
+                      {new Date(e.recordedAt).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Standings ─────────────────────────────────────────────────────────────────
 
 function StandingsView({ tournament }: { tournament: Tournament }) {
@@ -667,6 +927,10 @@ function StandingsView({ tournament }: { tournament: Tournament }) {
 
 function getChampion(t: Tournament): { playerId: number; name: string } | null {
   if (t.status !== 'Completed') return null;
+  if (t.format === 'TimeTrial') {
+    const lb = bestTimes(t.timeTrialEntries ?? []);
+    return lb[0] ? { playerId: lb[0].playerId, name: lb[0].playerName } : null;
+  }
   let m: TournamentMatch | undefined;
   if (t.format === 'DoubleElim')
     m = t.matches.find(x => x.bracket === 'GrandFinal' && x.winnerId !== null);
@@ -690,5 +954,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function formatLabel(f: string) {
-  return f === 'SingleElim' ? 'Single Elim' : f === 'DoubleElim' ? 'Double Elim' : 'Swiss';
+  if (f === 'SingleElim') return 'Single Elim';
+  if (f === 'DoubleElim') return 'Double Elim';
+  if (f === 'TimeTrial') return 'Time Trial';
+  return 'Swiss';
 }

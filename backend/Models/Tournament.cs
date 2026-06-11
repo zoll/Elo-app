@@ -1,6 +1,6 @@
 namespace TableTennis.Api.Models;
 
-public enum TournamentFormat { SingleElim, DoubleElim, Swiss }
+public enum TournamentFormat { SingleElim, DoubleElim, Swiss, TimeTrial }
 public enum TournamentStatus { Pending, InProgress, Completed }
 public enum MatchBracket { Winners, Losers, GrandFinal }
 
@@ -15,6 +15,19 @@ public class Tournament
 
     public ICollection<TournamentParticipant> Participants { get; set; } = new List<TournamentParticipant>();
     public ICollection<TournamentMatch> Matches { get; set; } = new List<TournamentMatch>();
+    public ICollection<TimeTrialEntry> TimeTrialEntries { get; set; } = new List<TimeTrialEntry>();
+}
+
+public class TimeTrialEntry
+{
+    public int Id { get; set; }
+    public int TournamentId { get; set; }
+    public int PlayerId { get; set; }
+    public int TimeMs { get; set; }
+    public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
+
+    public Tournament Tournament { get; set; } = null!;
+    public Player Player { get; set; } = null!;
 }
 
 public class TournamentParticipant

@@ -17,6 +17,7 @@ public class TournamentsController(AppDbContext db, TournamentService svc) : Con
         var tournaments = await db.Tournaments
             .Include(t => t.Matches).ThenInclude(m => m.Winner)
             .Include(t => t.Participants).ThenInclude(p => p.Player)
+            .Include(t => t.TimeTrialEntries).ThenInclude(e => e.Player)
             .OrderByDescending(t => t.CreatedAt)
             .ToListAsync();
 
@@ -40,6 +41,13 @@ public class TournamentsController(AppDbContext db, TournamentService svc) : Con
                 t.Matches.OrderByDescending(m => m.Round).FirstOrDefault(m => m.WinnerId.HasValue)?.Winner?.Name,
             TournamentFormat.Swiss =>
                 t.Participants.OrderByDescending(p => p.Points).ThenByDescending(p => p.Wins).FirstOrDefault()?.Player?.Name,
+            TournamentFormat.TimeTrial =>
+                t.TimeTrialEntries
+                    .GroupBy(e => e.PlayerId)
+                    .Select(g => new { PlayerId = g.Key, BestMs = g.Min(e => e.TimeMs) })
+                    .OrderBy(x => x.BestMs)
+                    .Select(x => t.TimeTrialEntries.First(e => e.PlayerId == x.PlayerId).Player?.Name)
+                    .FirstOrDefault(),
             _ => null,
         };
     }
@@ -111,12 +119,62 @@ public class TournamentsController(AppDbContext db, TournamentService svc) : Con
         var t = await db.Tournaments.Include(x => x.Participants).FirstOrDefaultAsync(x => x.Id == id);
         if (t is null) return NotFound();
         if (t.Status != TournamentStatus.Pending) return BadRequest("Tournament has already started.");
-        if (t.Participants.Count < 2) return BadRequest("At least 2 players must be registered.");
+        if (t.Format != TournamentFormat.TimeTrial && t.Participants.Count < 2)
+            return BadRequest("At least 2 players must be registered.");
 
         if (t.Format == TournamentFormat.Swiss)
             t.SwissRounds = TournamentService.DefaultSwissRounds(t.Participants.Count);
 
         await svc.StartAsync(t);
+        return Ok(await GetDetailDto(id));
+    }
+
+    // POST /api/tournaments/{id}/timetrial
+    [HttpPost("{id}/timetrial")]
+    public async Task<IActionResult> AddTimeTrialEntry(int id, [FromBody] TimeTrialEntryRequest req)
+    {
+        var t = await db.Tournaments
+            .Include(x => x.Participants)
+            .Include(x => x.TimeTrialEntries)
+            .FirstOrDefaultAsync(x => x.Id == id);
+        if (t is null) return NotFound();
+        if (t.Format != TournamentFormat.TimeTrial) return BadRequest("Not a Time Trial tournament.");
+        if (t.Status != TournamentStatus.InProgress) return BadRequest("Tournament is not in progress.");
+        if (await db.Players.FindAsync(req.PlayerId) is null) return NotFound("Player not found.");
+        if (req.TimeMs <= 0) return BadRequest("Time must be positive.");
+
+        // Auto-register the player if not already a participant
+        if (!t.Participants.Any(p => p.PlayerId == req.PlayerId))
+        {
+            db.TournamentParticipants.Add(new TournamentParticipant
+            {
+                TournamentId = id,
+                PlayerId = req.PlayerId,
+                Seed = t.Participants.Count + 1,
+            });
+        }
+
+        db.TimeTrialEntries.Add(new TimeTrialEntry
+        {
+            TournamentId = id,
+            PlayerId = req.PlayerId,
+            TimeMs = req.TimeMs,
+        });
+        await db.SaveChangesAsync();
+        return Ok(await GetDetailDto(id));
+    }
+
+    // POST /api/tournaments/{id}/complete
+    [HttpPost("{id}/complete")]
+    public async Task<IActionResult> CompleteTournament(int id)
+    {
+        var t = await db.Tournaments.FirstOrDefaultAsync(x => x.Id == id);
+        if (t is null) return NotFound();
+        if (t.Format != TournamentFormat.TimeTrial) return BadRequest("Only Time Trial tournaments can be manually completed.");
+        if (t.Status != TournamentStatus.InProgress) return BadRequest("Tournament is not in progress.");
+
+        t.Status = TournamentStatus.Completed;
+        await db.SaveChangesAsync();
         return Ok(await GetDetailDto(id));
     }
 
@@ -161,6 +219,7 @@ public class TournamentsController(AppDbContext db, TournamentService svc) : Con
             .Include(x => x.Matches).ThenInclude(m => m.Player1)
             .Include(x => x.Matches).ThenInclude(m => m.Player2)
             .Include(x => x.Matches).ThenInclude(m => m.Winner)
+            .Include(x => x.TimeTrialEntries).ThenInclude(e => e.Player)
             .FirstOrDefaultAsync(x => x.Id == id);
         if (t is null) return null;
 
@@ -194,6 +253,16 @@ public class TournamentsController(AppDbContext db, TournamentService svc) : Con
                     m.IsBye,
                     m.NextWinnerMatchId, m.NextLoserMatchId,
                 }),
+            TimeTrialEntries = t.TimeTrialEntries
+                .OrderBy(e => e.RecordedAt)
+                .Select(e => new
+                {
+                    e.Id,
+                    e.PlayerId,
+                    PlayerName = e.Player.Name,
+                    e.TimeMs,
+                    e.RecordedAt,
+                }),
         };
     }
 }
@@ -201,3 +270,4 @@ public class TournamentsController(AppDbContext db, TournamentService svc) : Con
 public record CreateTournamentRequest(string Name, TournamentFormat Format);
 public record AddParticipantRequest(int PlayerId);
 public record MatchResultRequest(int Player1Sets, int Player2Sets);
+public record TimeTrialEntryRequest(int PlayerId, int TimeMs);
